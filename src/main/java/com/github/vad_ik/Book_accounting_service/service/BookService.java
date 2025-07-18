@@ -1,20 +1,22 @@
 package com.github.vad_ik.Book_accounting_service.service;
 
-import com.github.vad_ik.Book_accounting_service.model.Author;
-import com.github.vad_ik.Book_accounting_service.model.Book;
-import com.github.vad_ik.Book_accounting_service.model.BookJson;
-import com.github.vad_ik.Book_accounting_service.repository.AuthorRepository;
-import com.github.vad_ik.Book_accounting_service.repository.BookRepository;
-import jakarta.transaction.Transactional;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
+import com.github.vad_ik.Book_accounting_service.database.entity.AuthorEntity;
+import com.github.vad_ik.Book_accounting_service.database.entity.BookEntity;
+import com.github.vad_ik.Book_accounting_service.database.repository.AuthorRepository;
+import com.github.vad_ik.Book_accounting_service.database.repository.BookRepository;
+import com.github.vad_ik.Book_accounting_service.model.BookRequest;
+import com.github.vad_ik.Book_accounting_service.model.BookResponse;
+import com.github.vad_ik.Book_accounting_service.model.exeption.DataIncorrectException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.stream.Stream;
 
 @Service
 public class BookService {
     private final BookRepository bookRepository;
+
     private final AuthorRepository authorRepository;
 
     public BookService(BookRepository bookRepository, AuthorRepository authorRepository) {
@@ -22,57 +24,40 @@ public class BookService {
         this.authorRepository = authorRepository;
     }
 
-    @Transactional
-    public Iterable<Book> getAllBook() {
-        return bookRepository.findAll();
+    public Stream<BookResponse> getAllBook() {
+        return (bookRepository.findAll()).stream().map(BookResponse::of);
     }
 
-    @Transactional
-    public Optional<Book> getBook(Long id) {
-        return bookRepository.findById(id);
+    public BookResponse getBook(Long id) {
+        Optional<BookEntity> book = bookRepository.findById(id);
+        if (book.isEmpty()) {
+            throw new DataIncorrectException("book with id " + id + " not found");
+        }
+        return BookResponse.of(book.get());
     }
 
-    @Transactional
-    public Page<Author> getAllAuthor(int page, int size) {
-        return authorRepository.findAll(PageRequest.of(page, size));
+    public void addBook(BookRequest bookRequest) {
+        BookEntity bookEntity = transformBook(bookRequest);
+        bookRepository.save(bookEntity);
     }
 
-    @Transactional
-    public Optional<Author> getAuthor(Long id) {
-        return authorRepository.findById(id);
+    public void updateBook(Long id, BookRequest bookRequest) {
+        BookEntity bookEntity = transformBook(bookRequest);
+        bookEntity.setId(id);
+        try {
+            bookRepository.save(bookEntity);
+        } catch (ObjectOptimisticLockingFailureException e) {//id книги не найден
+            throw new DataIncorrectException("during execution of PUT request book with id " + id + " Not Found ");
+        }
     }
 
-
-    @Transactional
-    public void addBook(BookJson bookJson) {
-        Book book = transformBook(bookJson);
-        bookRepository.save(book);
-
-    }
-
-    @Transactional
-    public void updateBook(Long id, BookJson bookJson) {
-        Book book = transformBook(bookJson);
-        book.setId(id);
-        bookRepository.save(book);
-    }
-
-    @Transactional
     public void delBook(Long id) {
         bookRepository.deleteById(id);
     }
 
-    @Transactional
-    public void addAuthor(Author author) {
-        authorRepository.save(author);
-    }
-
-
-    Book transformBook(BookJson bookJson) {
-        return new Book(bookJson.getTitle(),
-                authorRepository.getReferenceById(bookJson.getAuthor_id()),
-                bookJson.getYear(),
-                bookJson.getGenre()
-        );
+    BookEntity transformBook(BookRequest bookRequest) {
+        AuthorEntity authorEntity = authorRepository.findById(bookRequest.getAuthor_id())
+                .orElseThrow(() -> new DataIncorrectException("author with id " + bookRequest.getAuthor_id() + " not found"));
+        return bookRequest.toEntity(authorEntity);
     }
 }
